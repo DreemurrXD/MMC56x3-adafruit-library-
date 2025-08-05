@@ -1,0 +1,121 @@
+import machine
+from machine import I2C
+from machine import Pin
+import time
+import ustruct
+import sys
+
+address = 0x30 #write the address of the magnetometer here but it should be 0x30
+def reg_write(i2c, addr, reg, data):
+    """
+    Write bytes to the specified register.
+    """
+    
+    # Construct message
+    msg = bytearray()
+    msg.append(data)
+    #print(data,"writing")
+    #print(msg,"send")
+    
+    # Write out message to register
+    i2c.writeto_mem(addr, reg, msg)
+    
+def reg_read(i2c, addr, reg, nbytes = 1):
+    """
+    Read byte(s) from specified register. If nbytes > 1, read from consecutive
+    registers.
+    """
+    
+    # Check to make sure caller is asking for 1 or more bytes
+    if nbytes < 1:
+        return bytearray()
+    
+    # Request data from specified register(s) over I2C
+    data = i2c.readfrom_mem(addr, reg, nbytes)
+    
+    return data  
+
+def self_test(i2c):
+    test1 = reg_read(i2c, address, 0x27, 8)
+    test2 = reg_read(i2c, address, 0x28, 8)
+    test3 = reg_read(i2c, address, 0x29, 8)
+    test1 = ustruct.unpack_from(">B", test1, 0)[0]
+    test2 = ustruct.unpack_from(">B", test2, 0)[0]
+    test3 = ustruct.unpack_from(">B", test3, 0)[0]
+    #1e, 1f, 20
+    input1 = int(hex(int(test1 * 0.8)))
+    input2 = int(hex(int(test2 * 0.8)))
+    input3 = int(hex(int(test2 * 0.8)))
+    
+    #print(input1,type(input1), "input into 0x1E")
+    reg_write(i2c, address, 0x1E, input1)
+    reg_write(i2c, address, 0x1F, input2)
+    reg_write(i2c, address, 0x20, input3)
+    
+    reg_write(i2c, address, 0x1B, 0x41)
+    self_test = reg_read(i2c, address, 0x18, 8)
+    self_test = ustruct.unpack_from(">B", self_test, 0)[0]
+    #print(self_test, "output of self test, should be //0/ ////")
+    
+#you can read from the other axis's, just change the registers to read from the others
+#X is 0x00 0x01 0x06
+#Y is 0x02 0x03 0x07
+def z_axis_read(i2c):
+    #Z is 0x04   0x05   0x08
+    datax1 = reg_read(i2c, address, 0x04, 8)
+    datax2 = reg_read(i2c, address, 0x05, 8)
+    datax3 = reg_read(i2c, address, 0x08, 8)
+    acc_x1 = ustruct.unpack_from(">B", datax1, 0)[0]
+    acc_x2 = ustruct.unpack_from(">B", datax2, 0)[0]
+    acc_x3 = ustruct.unpack_from(">B", datax3, 0)[0]
+    #print(acc_x1,acc_x2,acc_x3)
+    acc_x = (acc_x1*4096)+(acc_x2*16) + (acc_x3/16) # acc_x * 4096
+    print(acc_x1,"acc_x1")
+    
+    return acc_x
+
+def z_axis_accurate(i2c):
+    #when i do this, I don't get an offset so this always returns zero for some reason
+    #set
+    data = 0x08
+    # cmm_ freq  auto_start   Auto_SR   reset            set       factory use     temp measure   mag measure
+    data = reg_write(i2c, address, 0x1B,data)#internal control 0
+    time.sleep(0.1)
+    
+    #measure
+    data = 0x01
+    # cmm_ freq  auto_start   Auto_SR   reset            set       factory use     temp measure   mag measure
+    data = reg_write(i2c, address, 0x1B,data)#internal control 0
+    
+    output1 = z_axis_read(i2c)
+    
+    #reset
+    data = 0x10
+    # cmm_ freq  auto_start   Auto_SR   reset            set       factory use     temp measure   mag measure
+    data = reg_write(i2c, address, 0x1B,data)#internal control 0
+    time.sleep(0.1)
+    
+    #measure
+    data = 0x01
+    # cmm_ freq  auto_start   Auto_SR   reset            set       factory use     temp measure   mag measure
+    data = reg_write(i2c, address, 0x1B,data)#internal control 0
+    
+    output2 = z_axis_read(i2c)
+    
+    
+    print(output1, "output1")
+    print(output2, "output2")
+    
+    true_output = (float(output1) - output2)/2
+    
+    return true_output
+    
+def temperature_read(i2c):
+    temperature = reg_read(i2c, address, 0x09, 8)
+    #print(temperature, "temp in bytes")
+    temperature = ustruct.unpack_from(">B", temperature, 0)[0]
+    #print(temperature)
+    temp = -75 + (temperature * 0.78125)
+    
+    return temp
+
