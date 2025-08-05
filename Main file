@@ -1,0 +1,71 @@
+import machine
+from machine import I2C
+from machine import Pin
+import time
+import ustruct
+import sys
+import binascii
+from magnetometer_library import reg_write, reg_read, self_test, z_axis_read, z_axis_accurate, temperature_read
+
+# I2C address (if the address isn't 0x30, make sure to change it in the library
+address = 0x30
+print("start", time.time())
+#you may have to change the pins for your machine
+i2c = machine.I2C(id=0, scl=machine.Pin(17), sda=machine.Pin(16), freq=200000)
+devices = i2c.scan()
+
+if devices:
+    for i in devices:
+        print(hex(i))
+    
+#setting up continuous mode
+#data = 0x40
+#print(data,"continious mode")
+#reg_write(i2c, address, 0x1A, data)#odr
+#data = 0x10
+#data = reg_write(i2c, address, 0x1D,data)#internal control register 2
+#data = 0x80
+#data = reg_write(i2c, address, 0x1B,data)#internal control 0
+
+
+# Run forever (obviously)
+while True:
+    #reg_write(i2c, address, 0x1B , 0x83)
+    #3 8 bit registers make a 24 bit value, just the z axis
+    status = reg_read(i2c, address, 0x18, 8)
+    status = ustruct.unpack_from(">B", status, 0)[0]
+    #print(status, "status")
+    #ensuring it passes the self test
+    # 0010 000 means self test has failed
+    
+    status_binary = bin(status)
+    print(status_binary, "status in binary")
+    #making sure it passes the saturation test (as in it unsaturates itself)
+    if ( (len(status_binary) >= 7) and (int(status_binary[len(status_binary)-(1+4)]) == 1) ):#self test needs to be done
+        #print("oh oh")
+        self_test(i2c)
+        
+        time.sleep(0.1)
+    else:
+        #reg_write(i2c, address, 0x1B, 0x80)
+        print("self test fine")
+        
+    #you must tell the magnetometer to take a measurement before reading it
+    
+    #manual mode if you wish
+    data = 0x03
+    #bit for the control register
+    # cmm_ freq  auto_start   Auto_SR   reset            set       factory use     temp measure   mag measure
+    data = reg_write(i2c, address, 0x1B,data)#internal control 0
+    
+    if ((len(status_binary) >= 10) and (int(status_binary[len(status_binary)-(1+6)]) == 1)):#reading magnetic field
+       
+        acc_z = z_axis_read(i2c)
+        print(acc_z,"value before scaling")
+        print(float((acc_z))*0.00625, "in mG")#*0.00625
+        
+    if ((len(status_binary) >= 10) and (int(status_binary[len(status_binary)-(1+7)]) == 1)):#reading temperature
+       
+        temp = temperature_read(i2c)
+        print(temp,"temperature")
+        time.sleep(0.2)
